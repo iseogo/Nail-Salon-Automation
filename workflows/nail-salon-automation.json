@@ -1,0 +1,457 @@
+{
+  "name": "SmartDesk AI — Nail Salon Automation ($799/mo)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "nail-salon-inquiry",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook_entry",
+      "name": "📥 Client Inquiry (Webhook)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [240, 100],
+      "notes": "Receives messages from Google, Facebook, Instagram, or Messenger via Meta API or Zapier bridge."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.message }}",
+              "operation": "isNotEmpty"
+            }
+          ]
+        }
+      },
+      "id": "if_wait_reply",
+      "name": "⏳ Wait for Reply?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [460, 100]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $vars.AI_AGENT_ACTIVE }}",
+              "value2": "true",
+              "operation": "equal"
+            }
+          ]
+        }
+      },
+      "id": "if_ai_available",
+      "name": "🤖 AI Agent Available?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [680, 60]
+    },
+    {
+      "parameters": {
+        "url": "https://api.retellai.com/v2/create-phone-call",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{ $vars.RETELL_API_KEY }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "agent_id",
+              "value": "agent_d4e806f2be5ef25d5ea61c17de"
+            },
+            {
+              "name": "from_number",
+              "value": "={{ $vars.TWILIO_FROM_NUMBER }}"
+            },
+            {
+              "name": "to_number",
+              "value": "={{ $json.phone }}"
+            },
+            {
+              "name": "metadata",
+              "value": "={{ JSON.stringify({ client_name: $json.name, source: $json.source }) }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "retell_call",
+      "name": "🎙️ AI Agent Calls & Books (Retell AI)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [900, -40],
+      "notes": "Replace agent_id with your Retell AI agent. Uses Twilio number."
+    },
+    {
+      "parameters": {
+        "channel": "#nail-salon-leads",
+        "text": "📌 *New Manual Reply Needed!*\n\nClient: {{ $json.name }}\nPhone: {{ $json.phone }}\nMessage: {{ $json.message }}\nSource: {{ $json.source }}\n\nAI Agent is unavailable — please reply manually.",
+        "otherOptions": {}
+      },
+      "id": "slack_staff_alert",
+      "name": "📣 Alert Staff (Slack)",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2,
+      "position": [900, 180],
+      "notes": "Sends Slack alert to staff when AI is unavailable. Replace with SMS if preferred."
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "baseId": "={{ $vars.AIRTABLE_BASE_ID }}",
+        "tableId": "NailSalonClients",
+        "fields": {
+          "fieldMappings": [
+            { "fieldId": "Name", "fieldValue": "={{ $json.name }}" },
+            { "fieldId": "Phone", "fieldValue": "={{ $json.phone }}" },
+            { "fieldId": "Email", "fieldValue": "={{ $json.email }}" },
+            { "fieldId": "Source", "fieldValue": "={{ $json.source }}" },
+            { "fieldId": "Status", "fieldValue": "Inquiry Received" },
+            { "fieldId": "Created At", "fieldValue": "={{ $now }}" },
+            { "fieldId": "Assigned Stylist", "fieldValue": "={{ $vars.DEFAULT_STYLIST }}" }
+          ]
+        }
+      },
+      "id": "airtable_crm",
+      "name": "📋 Add to CRM (Airtable)",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2,
+      "position": [1120, 60],
+      "notes": "Adds client to Airtable CRM. Set AIRTABLE_BASE_ID in n8n variables."
+    },
+    {
+      "parameters": {
+        "fromEmail": "noreply@nailsalon.com",
+        "toEmail": "={{ $vars.STYLIST_EMAIL }}",
+        "subject": "🔔 New Appointment Request — {{ $json.name }}",
+        "emailFormat": "html",
+        "message": "<h2>New Client Inquiry</h2><p><b>Name:</b> {{ $json.name }}<br><b>Phone:</b> {{ $json.phone }}<br><b>Email:</b> {{ $json.email }}<br><b>Source:</b> {{ $json.source }}</p><p>Please confirm the appointment in Airtable.</p>"
+      },
+      "id": "email_stylist",
+      "name": "📧 Notify Stylist (Email)",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2,
+      "position": [1340, 0]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.appointment_confirmed }}",
+              "value2": "true",
+              "operation": "equal"
+            }
+          ]
+        }
+      },
+      "id": "if_appt_confirmed",
+      "name": "✅ Appointment Confirmed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1340, 200]
+    },
+    {
+      "parameters": {
+        "unit": "hours",
+        "amount": 20
+      },
+      "id": "wait_24h",
+      "name": "⏱️ Wait 24 Hours Before Appt",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1,
+      "position": [1560, 120],
+      "notes": "Waits 24 hours (or calculate based on appointment datetime). Adjust to dynamic timing."
+    },
+    {
+      "parameters": {
+        "accountSid": "={{ $vars.TWILIO_ACCOUNT_SID }}",
+        "authToken": "={{ $vars.TWILIO_AUTH_TOKEN }}",
+        "from": "={{ $vars.TWILIO_FROM_NUMBER }}",
+        "to": "={{ $json.phone }}",
+        "message": "Hi {{ $json.name }}! 💅 This is a reminder for your nail appointment tomorrow. Reply CONFIRM to confirm or CANCEL to reschedule. — Nail Salon Team"
+      },
+      "id": "twilio_reminder",
+      "name": "📱 24hr Reminder (Twilio SMS)",
+      "type": "n8n-nodes-base.twilio",
+      "typeVersion": 1,
+      "position": [1780, 120]
+    },
+    {
+      "parameters": {
+        "accountSid": "={{ $vars.TWILIO_ACCOUNT_SID }}",
+        "authToken": "={{ $vars.TWILIO_AUTH_TOKEN }}",
+        "from": "={{ $vars.TWILIO_FROM_NUMBER }}",
+        "to": "={{ $json.phone }}",
+        "message": "Hi {{ $json.name }}, we noticed you couldn't make your appointment. No worries! Click here to reschedule: {{ $vars.BOOKING_LINK }} — Nail Salon Team"
+      },
+      "id": "twilio_reschedule",
+      "name": "🔄 Reschedule / Cancel SMS (Twilio)",
+      "type": "n8n-nodes-base.twilio",
+      "typeVersion": 1,
+      "position": [1560, 360],
+      "notes": "Sent when appointment was NOT confirmed."
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "baseId": "={{ $vars.AIRTABLE_BASE_ID }}",
+        "tableId": "NailSalonClients",
+        "id": "={{ $json.crm_record_id }}",
+        "fields": {
+          "fieldMappings": [
+            { "fieldId": "Status", "fieldValue": "Rescheduled" }
+          ]
+        }
+      },
+      "id": "airtable_update_reschedule",
+      "name": "📋 Update CRM — Rescheduled",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2,
+      "position": [1780, 360]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.final_confirm }}",
+              "value2": "CONFIRM",
+              "operation": "equal"
+            }
+          ]
+        }
+      },
+      "id": "if_client_confirm",
+      "name": "📲 Client Final Confirm?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [2000, 200]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "baseId": "={{ $vars.AIRTABLE_BASE_ID }}",
+        "tableId": "NailSalonClients",
+        "id": "={{ $json.crm_record_id }}",
+        "fields": {
+          "fieldMappings": [
+            { "fieldId": "Status", "fieldValue": "Service Completed" },
+            { "fieldId": "Service Date", "fieldValue": "={{ $now }}" }
+          ]
+        }
+      },
+      "id": "airtable_service_complete",
+      "name": "💅 Service Provided — Update CRM",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2,
+      "position": [2220, 100]
+    },
+    {
+      "parameters": {
+        "unit": "hours",
+        "amount": 2
+      },
+      "id": "wait_post_service",
+      "name": "⏱️ Wait 2hr Post-Service",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1,
+      "position": [2440, 100]
+    },
+    {
+      "parameters": {
+        "accountSid": "={{ $vars.TWILIO_ACCOUNT_SID }}",
+        "authToken": "={{ $vars.TWILIO_AUTH_TOKEN }}",
+        "from": "={{ $vars.TWILIO_FROM_NUMBER }}",
+        "to": "={{ $json.phone }}",
+        "message": "Hi {{ $json.name }}! 💅 We hope you loved your nails! We'd be so grateful if you left us a quick Google review: {{ $vars.GOOGLE_REVIEW_LINK }} — Nail Salon Team 💛"
+      },
+      "id": "twilio_review_request",
+      "name": "⭐ Request Google Review (Twilio)",
+      "type": "n8n-nodes-base.twilio",
+      "typeVersion": 1,
+      "position": [2660, 100]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.review_received }}",
+              "value2": "true",
+              "operation": "equal"
+            }
+          ]
+        }
+      },
+      "id": "if_review",
+      "name": "⭐ Review Received?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [2880, 100]
+    },
+    {
+      "parameters": {
+        "accountSid": "={{ $vars.TWILIO_ACCOUNT_SID }}",
+        "authToken": "={{ $vars.TWILIO_AUTH_TOKEN }}",
+        "from": "={{ $vars.TWILIO_FROM_NUMBER }}",
+        "to": "={{ $json.phone }}",
+        "message": "Thank you so much {{ $json.name }}! 🙏 Your review means the world to us. Here's 10% off your next visit: {{ $vars.LOYALTY_CODE }} — See you soon! 💅"
+      },
+      "id": "twilio_loyalty",
+      "name": "🎁 Thank You + Loyalty Offer (Twilio)",
+      "type": "n8n-nodes-base.twilio",
+      "typeVersion": 1,
+      "position": [3100, 0]
+    },
+    {
+      "parameters": {
+        "accountSid": "={{ $vars.TWILIO_ACCOUNT_SID }}",
+        "authToken": "={{ $vars.TWILIO_AUTH_TOKEN }}",
+        "from": "={{ $vars.TWILIO_FROM_NUMBER }}",
+        "to": "={{ $json.phone }}",
+        "message": "Hi {{ $json.name }}! 💕 We'd love to hear your feedback. Leave us a quick Google review here: {{ $vars.GOOGLE_REVIEW_LINK }} — It helps us so much! 🙏"
+      },
+      "id": "twilio_followup",
+      "name": "🔁 Follow-Up Review Request (Twilio)",
+      "type": "n8n-nodes-base.twilio",
+      "typeVersion": 1,
+      "position": [3100, 200]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{ \"status\": \"received\", \"message\": \"Thank you! We'll be in touch shortly.\" }"
+      },
+      "id": "webhook_response",
+      "name": "✅ Webhook Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [460, 300]
+    }
+  ],
+  "connections": {
+    "📥 Client Inquiry (Webhook)": {
+      "main": [[{ "node": "⏳ Wait for Reply?", "type": "main", "index": 0 }]]
+    },
+    "⏳ Wait for Reply?": {
+      "main": [
+        [{ "node": "🤖 AI Agent Available?", "type": "main", "index": 0 }],
+        [{ "node": "✅ Webhook Response", "type": "main", "index": 0 }]
+      ]
+    },
+    "🤖 AI Agent Available?": {
+      "main": [
+        [{ "node": "🎙️ AI Agent Calls & Books (Retell AI)", "type": "main", "index": 0 }],
+        [{ "node": "📣 Alert Staff (Slack)", "type": "main", "index": 0 }]
+      ]
+    },
+    "🎙️ AI Agent Calls & Books (Retell AI)": {
+      "main": [[{ "node": "📋 Add to CRM (Airtable)", "type": "main", "index": 0 }]]
+    },
+    "📣 Alert Staff (Slack)": {
+      "main": [[{ "node": "📋 Add to CRM (Airtable)", "type": "main", "index": 0 }]]
+    },
+    "📋 Add to CRM (Airtable)": {
+      "main": [[{ "node": "📧 Notify Stylist (Email)", "type": "main", "index": 0 }]]
+    },
+    "📧 Notify Stylist (Email)": {
+      "main": [[{ "node": "✅ Appointment Confirmed?", "type": "main", "index": 0 }]]
+    },
+    "✅ Appointment Confirmed?": {
+      "main": [
+        [{ "node": "⏱️ Wait 24 Hours Before Appt", "type": "main", "index": 0 }],
+        [{ "node": "🔄 Reschedule / Cancel SMS (Twilio)", "type": "main", "index": 0 }]
+      ]
+    },
+    "⏱️ Wait 24 Hours Before Appt": {
+      "main": [[{ "node": "📱 24hr Reminder (Twilio SMS)", "type": "main", "index": 0 }]]
+    },
+    "📱 24hr Reminder (Twilio SMS)": {
+      "main": [[{ "node": "📲 Client Final Confirm?", "type": "main", "index": 0 }]]
+    },
+    "🔄 Reschedule / Cancel SMS (Twilio)": {
+      "main": [[{ "node": "📋 Update CRM — Rescheduled", "type": "main", "index": 0 }]]
+    },
+    "📲 Client Final Confirm?": {
+      "main": [
+        [{ "node": "💅 Service Provided — Update CRM", "type": "main", "index": 0 }],
+        [{ "node": "🔄 Reschedule / Cancel SMS (Twilio)", "type": "main", "index": 0 }]
+      ]
+    },
+    "💅 Service Provided — Update CRM": {
+      "main": [[{ "node": "⏱️ Wait 2hr Post-Service", "type": "main", "index": 0 }]]
+    },
+    "⏱️ Wait 2hr Post-Service": {
+      "main": [[{ "node": "⭐ Request Google Review (Twilio)", "type": "main", "index": 0 }]]
+    },
+    "⭐ Request Google Review (Twilio)": {
+      "main": [[{ "node": "⭐ Review Received?", "type": "main", "index": 0 }]]
+    },
+    "⭐ Review Received?": {
+      "main": [
+        [{ "node": "🎁 Thank You + Loyalty Offer (Twilio)", "type": "main", "index": 0 }],
+        [{ "node": "🔁 Follow-Up Review Request (Twilio)", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": ""
+  },
+  "staticData": null,
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "instanceId": "smartdesk-ai-nail-salon"
+  },
+  "pinData": {},
+  "versionId": "1.0.0",
+  "triggerCount": 1,
+  "tags": [
+    { "name": "SmartDesk AI" },
+    { "name": "Nail Salon" },
+    { "name": "Automation" },
+    { "name": "Voice Agent" }
+  ],
+  "__readme__": {
+    "title": "SmartDesk AI — Nail Salon Automation Workflow",
+    "price": "$799/month",
+    "variables_required": [
+      "RETELL_API_KEY — Your Retell AI API key",
+      "TWILIO_ACCOUNT_SID — Twilio account SID",
+      "TWILIO_AUTH_TOKEN — Twilio auth token",
+      "TWILIO_FROM_NUMBER — Your Twilio phone number (e.g. +15315416041)",
+      "AIRTABLE_BASE_ID — Your Airtable base ID for nail salon CRM",
+      "STYLIST_EMAIL — Email of the default stylist to notify",
+      "DEFAULT_STYLIST — Name of default stylist",
+      "BOOKING_LINK — Public booking link (Calendly or similar)",
+      "GOOGLE_REVIEW_LINK — Google Maps review link for the salon",
+      "LOYALTY_CODE — Discount code for returning clients",
+      "AI_AGENT_ACTIVE — Set to 'true' when AI agent is live"
+    ],
+    "setup_steps": [
+      "1. Import this JSON into n8n at n8n.smartdeskai.cloud",
+      "2. Set all variables under Settings > Variables",
+      "3. Configure Airtable credentials (OAuth or API key)",
+      "4. Configure Twilio credentials",
+      "5. Configure Slack credentials (or replace with Twilio SMS)",
+      "6. Set your Retell AI agent_id (current: agent_d4e806f2be5ef25d5ea61c17de)",
+      "7. Create webhook trigger in Meta Business Suite or Zapier",
+      "8. Activate workflow and test with a sample inquiry"
+    ]
+  }
+}
