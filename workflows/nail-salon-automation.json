@@ -114,10 +114,10 @@
         "tableId": "NailSalonClients",
         "fields": {
           "fieldMappings": [
-            { "fieldId": "Name", "fieldValue": "={{ $json.name }}" },
-            { "fieldId": "Phone", "fieldValue": "={{ $json.phone }}" },
-            { "fieldId": "Email", "fieldValue": "={{ $json.email }}" },
-            { "fieldId": "Source", "fieldValue": "={{ $json.source }}" },
+            { "fieldId": "Name", "fieldValue": "={{ $('📥 Client Inquiry (Webhook)').item.json.name }}" },
+            { "fieldId": "Phone", "fieldValue": "={{ $('📥 Client Inquiry (Webhook)').item.json.phone }}" },
+            { "fieldId": "Email", "fieldValue": "={{ $('📥 Client Inquiry (Webhook)').item.json.email }}" },
+            { "fieldId": "Source", "fieldValue": "={{ $('📥 Client Inquiry (Webhook)').item.json.source }}" },
             { "fieldId": "Status", "fieldValue": "Inquiry Received" },
             { "fieldId": "Created At", "fieldValue": "={{ $now }}" },
             { "fieldId": "Assigned Stylist", "fieldValue": "={{ $vars.DEFAULT_STYLIST }}" }
@@ -133,6 +133,27 @@
     },
     {
       "parameters": {
+        "values": {
+          "string": [
+            { "name": "crm_record_id", "value": "={{ $json.id }}" },
+            { "name": "name",           "value": "={{ $('📥 Client Inquiry (Webhook)').item.json.name }}" },
+            { "name": "phone",          "value": "={{ $('📥 Client Inquiry (Webhook)').item.json.phone }}" },
+            { "name": "email",          "value": "={{ $('📥 Client Inquiry (Webhook)').item.json.email }}" },
+            { "name": "source",         "value": "={{ $('📥 Client Inquiry (Webhook)').item.json.source }}" },
+            { "name": "appointment_confirmed", "value": "={{ $('📥 Client Inquiry (Webhook)').item.json.appointment_confirmed }}" }
+          ]
+        },
+        "options": { "keepOnlySet": true }
+      },
+      "id": "set_crm_id",
+      "name": "🗃️ Capture CRM ID + Restore Client Data",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [1340, 60],
+      "notes": "Captures Airtable record ID and merges back original webhook fields so downstream nodes can use $json.phone, $json.name, $json.crm_record_id reliably."
+    },
+    {
+      "parameters": {
         "fromEmail": "noreply@nailsalon.com",
         "toEmail": "={{ $vars.STYLIST_EMAIL }}",
         "subject": "🔔 New Appointment Request — {{ $json.name }}",
@@ -143,7 +164,7 @@
       "name": "📧 Notify Stylist (Email)",
       "type": "n8n-nodes-base.emailSend",
       "typeVersion": 2,
-      "position": [1340, 0]
+      "position": [1560, 0]
     },
     {
       "parameters": {
@@ -161,19 +182,20 @@
       "name": "✅ Appointment Confirmed?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 1,
-      "position": [1340, 200]
+      "position": [1560, 200],
+      "notes": "appointment_confirmed is set by the Set node and comes from the original webhook payload — reliable even after Airtable/email nodes."
     },
     {
       "parameters": {
         "unit": "hours",
-        "amount": 20
+        "amount": 24
       },
       "id": "wait_24h",
       "name": "⏱️ Wait 24 Hours Before Appt",
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1,
-      "position": [1560, 120],
-      "notes": "Waits 24 hours (or calculate based on appointment datetime). Adjust to dynamic timing."
+      "position": [1780, 120],
+      "notes": "Waits 24 hours before sending the reminder SMS."
     },
     {
       "parameters": {
@@ -187,7 +209,8 @@
       "name": "📱 24hr Reminder (Twilio SMS)",
       "type": "n8n-nodes-base.twilio",
       "typeVersion": 1,
-      "position": [1780, 120]
+      "position": [2000, 120],
+      "notes": "After this SMS is sent, the flow pauses. Continuation is handled by the Inbound SMS Reply webhook below when the client replies CONFIRM or CANCEL."
     },
     {
       "parameters": {
@@ -201,8 +224,8 @@
       "name": "🔄 Reschedule / Cancel SMS (Twilio)",
       "type": "n8n-nodes-base.twilio",
       "typeVersion": 1,
-      "position": [1560, 360],
-      "notes": "Sent when appointment was NOT confirmed."
+      "position": [1780, 360],
+      "notes": "Sent when appointment was NOT confirmed by the stylist, or when the client replies CANCEL to the reminder."
     },
     {
       "parameters": {
@@ -220,25 +243,75 @@
       "name": "📋 Update CRM — Rescheduled",
       "type": "n8n-nodes-base.airtable",
       "typeVersion": 2,
-      "position": [1780, 360]
+      "position": [2000, 360]
+    },
+
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "twilio-sms-reply",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "webhook_sms_reply",
+      "name": "📲 Inbound SMS Reply (Twilio Webhook)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [240, 600],
+      "notes": "Configure this URL as the 'A message comes in' webhook in your Twilio phone number settings. Twilio sends From, To, Body fields as form-encoded POST."
+    },
+    {
+      "parameters": {
+        "operation": "list",
+        "baseId": "={{ $vars.AIRTABLE_BASE_ID }}",
+        "tableId": "NailSalonClients",
+        "returnAll": false,
+        "limit": 1,
+        "filterByFormula": "={{ `{Phone}='${$json.From}'` }}"
+      },
+      "id": "airtable_lookup_client",
+      "name": "🔍 Lookup Client by Phone (Airtable)",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2,
+      "position": [460, 600],
+      "notes": "Finds the Airtable record for the client who just replied, using their phone number."
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            { "name": "crm_record_id", "value": "={{ $json.id }}" },
+            { "name": "name",          "value": "={{ $json.fields.Name }}" },
+            { "name": "phone",         "value": "={{ $json.fields.Phone }}" },
+            { "name": "reply",         "value": "={{ $('📲 Inbound SMS Reply (Twilio Webhook)').item.json.Body.trim().toUpperCase() }}" }
+          ]
+        },
+        "options": { "keepOnlySet": true }
+      },
+      "id": "set_sms_context",
+      "name": "🗃️ Merge SMS Reply + Client Data",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [680, 600],
+      "notes": "Merges the client's reply text (CONFIRM/CANCEL) with the Airtable record data so downstream nodes have both."
     },
     {
       "parameters": {
         "conditions": {
           "string": [
             {
-              "value1": "={{ $json.final_confirm }}",
+              "value1": "={{ $json.reply }}",
               "value2": "CONFIRM",
               "operation": "equal"
             }
           ]
         }
       },
-      "id": "if_client_confirm",
-      "name": "📲 Client Final Confirm?",
+      "id": "if_sms_confirm",
+      "name": "📲 Client Replied CONFIRM?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 1,
-      "position": [2000, 200]
+      "position": [900, 600]
     },
     {
       "parameters": {
@@ -257,7 +330,7 @@
       "name": "💅 Service Provided — Update CRM",
       "type": "n8n-nodes-base.airtable",
       "typeVersion": 2,
-      "position": [2220, 100]
+      "position": [1120, 500]
     },
     {
       "parameters": {
@@ -268,7 +341,7 @@
       "name": "⏱️ Wait 2hr Post-Service",
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1,
-      "position": [2440, 100]
+      "position": [1340, 500]
     },
     {
       "parameters": {
@@ -282,25 +355,19 @@
       "name": "⭐ Request Google Review (Twilio)",
       "type": "n8n-nodes-base.twilio",
       "typeVersion": 1,
-      "position": [2660, 100]
+      "position": [1560, 500]
     },
     {
       "parameters": {
-        "conditions": {
-          "string": [
-            {
-              "value1": "={{ $json.review_received }}",
-              "value2": "true",
-              "operation": "equal"
-            }
-          ]
-        }
+        "unit": "days",
+        "amount": 3
       },
-      "id": "if_review",
-      "name": "⭐ Review Received?",
-      "type": "n8n-nodes-base.if",
+      "id": "wait_review_days",
+      "name": "⏱️ Wait 3 Days (Review Window)",
+      "type": "n8n-nodes-base.wait",
       "typeVersion": 1,
-      "position": [2880, 100]
+      "position": [1780, 500],
+      "notes": "Waits 3 days after the review request, then sends the loyalty offer regardless. Detecting an actual Google review submission requires a Google My Business webhook outside of this workflow."
     },
     {
       "parameters": {
@@ -308,27 +375,13 @@
         "authToken": "={{ $vars.TWILIO_AUTH_TOKEN }}",
         "from": "={{ $vars.TWILIO_FROM_NUMBER }}",
         "to": "={{ $json.phone }}",
-        "message": "Thank you so much {{ $json.name }}! 🙏 Your review means the world to us. Here's 10% off your next visit: {{ $vars.LOYALTY_CODE }} — See you soon! 💅"
+        "message": "Thank you so much {{ $json.name }}! 🙏 We hope you loved your nails. As a thank-you for being our client, here's 10% off your next visit: {{ $vars.LOYALTY_CODE }} — See you soon! 💅"
       },
       "id": "twilio_loyalty",
-      "name": "🎁 Thank You + Loyalty Offer (Twilio)",
+      "name": "🎁 Loyalty Offer (Twilio)",
       "type": "n8n-nodes-base.twilio",
       "typeVersion": 1,
-      "position": [3100, 0]
-    },
-    {
-      "parameters": {
-        "accountSid": "={{ $vars.TWILIO_ACCOUNT_SID }}",
-        "authToken": "={{ $vars.TWILIO_AUTH_TOKEN }}",
-        "from": "={{ $vars.TWILIO_FROM_NUMBER }}",
-        "to": "={{ $json.phone }}",
-        "message": "Hi {{ $json.name }}! 💕 We'd love to hear your feedback. Leave us a quick Google review here: {{ $vars.GOOGLE_REVIEW_LINK }} — It helps us so much! 🙏"
-      },
-      "id": "twilio_followup",
-      "name": "🔁 Follow-Up Review Request (Twilio)",
-      "type": "n8n-nodes-base.twilio",
-      "typeVersion": 1,
-      "position": [3100, 200]
+      "position": [2000, 500]
     },
     {
       "parameters": {
@@ -365,10 +418,16 @@
       "main": [[{ "node": "📋 Add to CRM (Airtable)", "type": "main", "index": 0 }]]
     },
     "📋 Add to CRM (Airtable)": {
-      "main": [[{ "node": "📧 Notify Stylist (Email)", "type": "main", "index": 0 }]]
+      "main": [[{ "node": "🗃️ Capture CRM ID + Restore Client Data", "type": "main", "index": 0 }]]
+    },
+    "🗃️ Capture CRM ID + Restore Client Data": {
+      "main": [
+        [{ "node": "📧 Notify Stylist (Email)", "type": "main", "index": 0 }],
+        [{ "node": "✅ Appointment Confirmed?", "type": "main", "index": 0 }]
+      ]
     },
     "📧 Notify Stylist (Email)": {
-      "main": [[{ "node": "✅ Appointment Confirmed?", "type": "main", "index": 0 }]]
+      "main": []
     },
     "✅ Appointment Confirmed?": {
       "main": [
@@ -380,12 +439,22 @@
       "main": [[{ "node": "📱 24hr Reminder (Twilio SMS)", "type": "main", "index": 0 }]]
     },
     "📱 24hr Reminder (Twilio SMS)": {
-      "main": [[{ "node": "📲 Client Final Confirm?", "type": "main", "index": 0 }]]
+      "main": []
     },
     "🔄 Reschedule / Cancel SMS (Twilio)": {
       "main": [[{ "node": "📋 Update CRM — Rescheduled", "type": "main", "index": 0 }]]
     },
-    "📲 Client Final Confirm?": {
+
+    "📲 Inbound SMS Reply (Twilio Webhook)": {
+      "main": [[{ "node": "🔍 Lookup Client by Phone (Airtable)", "type": "main", "index": 0 }]]
+    },
+    "🔍 Lookup Client by Phone (Airtable)": {
+      "main": [[{ "node": "🗃️ Merge SMS Reply + Client Data", "type": "main", "index": 0 }]]
+    },
+    "🗃️ Merge SMS Reply + Client Data": {
+      "main": [[{ "node": "📲 Client Replied CONFIRM?", "type": "main", "index": 0 }]]
+    },
+    "📲 Client Replied CONFIRM?": {
       "main": [
         [{ "node": "💅 Service Provided — Update CRM", "type": "main", "index": 0 }],
         [{ "node": "🔄 Reschedule / Cancel SMS (Twilio)", "type": "main", "index": 0 }]
@@ -398,13 +467,10 @@
       "main": [[{ "node": "⭐ Request Google Review (Twilio)", "type": "main", "index": 0 }]]
     },
     "⭐ Request Google Review (Twilio)": {
-      "main": [[{ "node": "⭐ Review Received?", "type": "main", "index": 0 }]]
+      "main": [[{ "node": "⏱️ Wait 3 Days (Review Window)", "type": "main", "index": 0 }]]
     },
-    "⭐ Review Received?": {
-      "main": [
-        [{ "node": "🎁 Thank You + Loyalty Offer (Twilio)", "type": "main", "index": 0 }],
-        [{ "node": "🔁 Follow-Up Review Request (Twilio)", "type": "main", "index": 0 }]
-      ]
+    "⏱️ Wait 3 Days (Review Window)": {
+      "main": [[{ "node": "🎁 Loyalty Offer (Twilio)", "type": "main", "index": 0 }]]
     }
   },
   "settings": {
@@ -419,8 +485,8 @@
     "instanceId": "smartdesk-ai-nail-salon"
   },
   "pinData": {},
-  "versionId": "1.0.0",
-  "triggerCount": 1,
+  "versionId": "1.1.0",
+  "triggerCount": 2,
   "tags": [
     { "name": "SmartDesk AI" },
     { "name": "Nail Salon" },
@@ -444,14 +510,21 @@
       "AI_AGENT_ACTIVE — Set to 'true' when AI agent is live"
     ],
     "setup_steps": [
-      "1. Import this JSON into n8n at n8n.smartdeskai.cloud",
+      "1. Import this JSON into n8n",
       "2. Set all variables under Settings > Variables",
       "3. Configure Airtable credentials (OAuth or API key)",
       "4. Configure Twilio credentials",
       "5. Configure Slack credentials (or replace with Twilio SMS)",
       "6. Set your Retell AI agent_id (current: agent_d4e806f2be5ef25d5ea61c17de)",
-      "7. Create webhook trigger in Meta Business Suite or Zapier",
-      "8. Activate workflow and test with a sample inquiry"
+      "7. In Twilio console, set the 'A message comes in' webhook for your phone number to: https://<your-n8n-host>/webhook/twilio-sms-reply",
+      "8. Create inquiry webhook trigger in Meta Business Suite or Zapier pointing to: https://<your-n8n-host>/webhook/nail-salon-inquiry",
+      "9. Activate workflow and test with a sample inquiry"
+    ],
+    "architecture_notes": [
+      "Two webhook triggers: nail-salon-inquiry (intake) and twilio-sms-reply (CONFIRM/CANCEL replies).",
+      "A Set node after Airtable create captures the record ID and restores original client fields so all downstream nodes can reference $json.name, $json.phone, $json.crm_record_id reliably.",
+      "Client CONFIRM/CANCEL replies are handled by the inbound SMS webhook, not by polling after the reminder send.",
+      "The loyalty offer fires 3 days after the review request — detecting an actual Google review requires a Google My Business webhook outside this workflow."
     ]
   }
 }
