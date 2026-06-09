@@ -208,8 +208,7 @@
           "mappingMode": "defineBelow",
           "value": {
             "id": "={{ $('Check Client in CRM').item.json.id }}",
-            "LastMessageAt": "={{ $('Normalize Message').item.json.receivedAt }}",
-            "MessageCount": "={{ ($('Check Client in CRM').item.json.MessageCount || 0) + 1 }}"
+            "LastMessageAt": "={{ $('Normalize Message').item.json.receivedAt }}"
           },
           "matchingColumns": [
             "id"
@@ -233,17 +232,6 @@
               "canBeUsedToMatch": true,
               "display": true,
               "type": "string",
-              "readOnly": false,
-              "removed": false
-            },
-            {
-              "id": "MessageCount",
-              "displayName": "MessageCount",
-              "required": false,
-              "defaultMatch": false,
-              "canBeUsedToMatch": true,
-              "display": true,
-              "type": "number",
               "readOnly": false,
               "removed": false
             }
