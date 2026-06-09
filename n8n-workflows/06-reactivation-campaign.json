@@ -1,0 +1,136 @@
+{
+  "name": "06 - Reactivation Campaign",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "cronExpression", "expression": "0 10 * * 1" }]
+        }
+      },
+      "id": "weekly-monday-trigger",
+      "name": "Every Monday 10AM",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "operation": "search",
+        "baseId": "={{ $env.AIRTABLE_BASE_ID }}",
+        "tableId": "={{ $env.AIRTABLE_CLIENTS_TABLE }}",
+        "filterByFormula": "=AND({Status}='Active', {ReactivationOptOut}!=TRUE(), OR(AND(DATETIME_DIFF(TODAY(), {LastVisitDate}, 'days') >= 30, DATETIME_DIFF(TODAY(), {LastVisitDate}, 'days') < 35), AND(DATETIME_DIFF(TODAY(), {LastVisitDate}, 'days') >= 60, DATETIME_DIFF(TODAY(), {LastVisitDate}, 'days') < 65), AND(DATETIME_DIFF(TODAY(), {LastVisitDate}, 'days') >= 90, DATETIME_DIFF(TODAY(), {LastVisitDate}, 'days') < 95)))",
+        "options": {}
+      },
+      "id": "get-inactive-clients",
+      "name": "Get Inactive Clients (30/60/90 days)",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "leftValue": "={{ $json.records.length }}",
+              "rightValue": 0,
+              "operator": { "type": "number", "operation": "gt" }
+            }
+          ]
+        }
+      },
+      "id": "has-inactive",
+      "name": "Inactive Clients Found?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "records",
+        "options": {}
+      },
+      "id": "split-inactive",
+      "name": "Split Inactive Clients",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [900, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "const client = $input.first().json.fields;\nconst clientName = client.ClientName || 'there';\nconst lastVisit = client.LastVisitDate || '';\nconst salonName = process.env.SALON_NAME || 'our salon';\nconst salonPhone = process.env.SALON_PHONE || '';\n\n// Calculate days since last visit\nconst lastVisitDate = new Date(lastVisit);\nconst today = new Date();\nconst daysSince = Math.floor((today - lastVisitDate) / (1000 * 60 * 60 * 24));\n\nlet message, tier;\n\nif (daysSince >= 30 && daysSince < 65) {\n  tier = '30-day';\n  message = `Hi ${clientName}! 💅 It's been a while since your last visit to ${salonName}! We miss you! Book this week and get $5 off your next service. Reply BOOK or call ${salonPhone} 🌸`;\n} else if (daysSince >= 60 && daysSince < 95) {\n  tier = '60-day';\n  message = `Hi ${clientName}! 💅 We haven't seen you in 2 months at ${salonName} — we hope you're doing great! Come back this month and enjoy 10% off. Reply BOOK to schedule! 🌸`;\n} else if (daysSince >= 90) {\n  tier = '90-day';\n  message = `Hi ${clientName}! 🌸 We miss you at ${salonName}! It's been 3 months since your last visit. As a valued client, here's a special: FREE nail art with any full-price service. Valid this week only! Reply BOOK or call ${salonPhone}.`;\n}\n\nreturn [{ json: {\n  phone: client.Phone,\n  message,\n  clientId: $input.first().json.id,\n  clientName,\n  tier,\n  daysSince\n}}];"
+      },
+      "id": "build-reactivation-message",
+      "name": "Build Reactivation Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 200]
+    },
+    {
+      "parameters": {
+        "url": "https://rest.nexmo.com/sms/json",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "api_key", "value": "={{ $env.VONAGE_API_KEY }}" },
+            { "name": "api_secret", "value": "={{ $env.VONAGE_API_SECRET }}" },
+            { "name": "to", "value": "={{ $json.phone }}" },
+            { "name": "from", "value": "={{ $env.VONAGE_FROM_NUMBER }}" },
+            { "name": "text", "value": "={{ $json.message }}" }
+          ]
+        }
+      },
+      "id": "send-reactivation-sms",
+      "name": "Send Reactivation SMS",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1340, 200]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "baseId": "={{ $env.AIRTABLE_BASE_ID }}",
+        "tableId": "={{ $env.AIRTABLE_CLIENTS_TABLE }}",
+        "id": "={{ $('Build Reactivation Message').item.json.clientId }}",
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "LastReactivationAt": "={{ new Date().toISOString() }}",
+            "ReactivationTier": "={{ $('Build Reactivation Message').item.json.tier }}",
+            "ReactivationCount": "={{ (client.ReactivationCount || 0) + 1 }}"
+          }
+        }
+      },
+      "id": "update-reactivation-record",
+      "name": "Log Reactivation Attempt",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2,
+      "position": [1560, 200]
+    }
+  ],
+  "connections": {
+    "Every Monday 10AM": {
+      "main": [[{ "node": "Get Inactive Clients (30/60/90 days)", "type": "main", "index": 0 }]]
+    },
+    "Get Inactive Clients (30/60/90 days)": {
+      "main": [[{ "node": "Inactive Clients Found?", "type": "main", "index": 0 }]]
+    },
+    "Inactive Clients Found?": {
+      "main": [
+        [{ "node": "Split Inactive Clients", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "Split Inactive Clients": {
+      "main": [[{ "node": "Build Reactivation Message", "type": "main", "index": 0 }]]
+    },
+    "Build Reactivation Message": {
+      "main": [[{ "node": "Send Reactivation SMS", "type": "main", "index": 0 }]]
+    },
+    "Send Reactivation SMS": {
+      "main": [[{ "node": "Log Reactivation Attempt", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": { "executionOrder": "v1" },
+  "tags": ["nail-salon", "reactivation", "retention", "smartdesk-ai"]
+}

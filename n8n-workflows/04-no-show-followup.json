@@ -1,0 +1,137 @@
+{
+  "name": "04 - No-Show Follow-Up",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "cronExpression", "expression": "0 19 * * *" }]
+        }
+      },
+      "id": "evening-trigger",
+      "name": "Evening 7PM Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "operation": "search",
+        "baseId": "={{ $env.AIRTABLE_BASE_ID }}",
+        "tableId": "={{ $env.AIRTABLE_APPOINTMENTS_TABLE }}",
+        "filterByFormula": "=AND({Status}='No-Show', {NoShowFollowUpSent}!=TRUE(), {AppointmentDate}=TODAY())",
+        "options": {}
+      },
+      "id": "get-no-shows",
+      "name": "Get Today's No-Shows",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "leftValue": "={{ $json.records.length }}",
+              "rightValue": 0,
+              "operator": { "type": "number", "operation": "gt" }
+            }
+          ]
+        }
+      },
+      "id": "has-no-shows",
+      "name": "No-Shows Found?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "records",
+        "options": {}
+      },
+      "id": "split-no-shows",
+      "name": "Split No-Shows",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [900, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "const appt = $input.first().json.fields;\nconst clientName = appt.ClientName || 'there';\nconst service = appt.Service || 'your appointment';\nconst salonName = process.env.SALON_NAME || 'your salon';\nconst salonPhone = process.env.SALON_PHONE || '';\n\nconst message = `Hi ${clientName}, we missed you today for your ${service} at ${salonName}! 💅 We hope everything is okay. Reply REBOOK to schedule a new time, or call us at ${salonPhone}. We'd love to see you!`;\n\nreturn [{ json: {\n  phone: appt.Phone,\n  message,\n  appointmentId: $input.first().json.id,\n  clientName\n}}];"
+      },
+      "id": "build-noshow-message",
+      "name": "Build No-Show Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 200]
+    },
+    {
+      "parameters": {
+        "url": "https://rest.nexmo.com/sms/json",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "api_key", "value": "={{ $env.VONAGE_API_KEY }}" },
+            { "name": "api_secret", "value": "={{ $env.VONAGE_API_SECRET }}" },
+            { "name": "to", "value": "={{ $json.phone }}" },
+            { "name": "from", "value": "={{ $env.VONAGE_FROM_NUMBER }}" },
+            { "name": "text", "value": "={{ $json.message }}" }
+          ]
+        }
+      },
+      "id": "send-noshow-sms",
+      "name": "Send No-Show SMS",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1340, 200]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "baseId": "={{ $env.AIRTABLE_BASE_ID }}",
+        "tableId": "={{ $env.AIRTABLE_APPOINTMENTS_TABLE }}",
+        "id": "={{ $('Build No-Show Message').item.json.appointmentId }}",
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "NoShowFollowUpSent": true,
+            "NoShowFollowUpAt": "={{ new Date().toISOString() }}",
+            "Status": "No-Show — Followed Up",
+            "ReactivationEligible": true
+          }
+        }
+      },
+      "id": "update-noshow-record",
+      "name": "Update No-Show Record",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2,
+      "position": [1560, 200]
+    }
+  ],
+  "connections": {
+    "Evening 7PM Trigger": {
+      "main": [[{ "node": "Get Today's No-Shows", "type": "main", "index": 0 }]]
+    },
+    "Get Today's No-Shows": {
+      "main": [[{ "node": "No-Shows Found?", "type": "main", "index": 0 }]]
+    },
+    "No-Shows Found?": {
+      "main": [
+        [{ "node": "Split No-Shows", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "Split No-Shows": {
+      "main": [[{ "node": "Build No-Show Message", "type": "main", "index": 0 }]]
+    },
+    "Build No-Show Message": {
+      "main": [[{ "node": "Send No-Show SMS", "type": "main", "index": 0 }]]
+    },
+    "Send No-Show SMS": {
+      "main": [[{ "node": "Update No-Show Record", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": { "executionOrder": "v1" },
+  "tags": ["nail-salon", "no-show", "follow-up", "smartdesk-ai"]
+}

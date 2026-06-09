@@ -1,0 +1,222 @@
+{
+  "name": "01 - Lead Capture & Routing",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "nail-salon-inbound",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-inbound",
+      "name": "Inbound SMS/WhatsApp",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Normalize inbound message from Vonage or Twilio\nconst body = $input.first().json;\n\n// Support both Vonage and Twilio formats\nconst from = body.msisdn || body.From || body.from || '';\nconst text = body.text || body.Body || body.message || '';\nconst messageId = body.messageId || body.MessageSid || Date.now().toString();\nconst channel = body.channel || (body.From ? 'twilio' : 'vonage');\n\nreturn [{\n  json: {\n    from: from.replace(/\\D/g, '').replace(/^1/, ''),  // normalize to 10-digit\n    fromRaw: from,\n    text: text.trim(),\n    messageId,\n    channel,\n    receivedAt: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "normalize-message",
+      "name": "Normalize Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "operation": "search",
+        "baseId": "={{ $env.AIRTABLE_BASE_ID }}",
+        "tableId": "={{ $env.AIRTABLE_CLIENTS_TABLE }}",
+        "filterByFormula": "={Phone}='{{ $json.from }}'",
+        "options": {
+          "maxRecords": 1
+        }
+      },
+      "id": "check-client-exists",
+      "name": "Check Client in CRM",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.records.length }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ]
+        }
+      },
+      "id": "client-exists-check",
+      "name": "Client Exists?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "baseId": "={{ $env.AIRTABLE_BASE_ID }}",
+        "tableId": "={{ $env.AIRTABLE_CLIENTS_TABLE }}",
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Phone": "={{ $('Normalize Message').item.json.from }}",
+            "PhoneRaw": "={{ $('Normalize Message').item.json.fromRaw }}",
+            "Status": "New Lead",
+            "Channel": "={{ $('Normalize Message').item.json.channel }}",
+            "FirstContactAt": "={{ $('Normalize Message').item.json.receivedAt }}",
+            "LastMessageAt": "={{ $('Normalize Message').item.json.receivedAt }}"
+          }
+        }
+      },
+      "id": "create-new-client",
+      "name": "Create New Client",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2,
+      "position": [1120, 180]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "baseId": "={{ $env.AIRTABLE_BASE_ID }}",
+        "tableId": "={{ $env.AIRTABLE_CLIENTS_TABLE }}",
+        "id": "={{ $json.records[0].id }}",
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "LastMessageAt": "={{ $('Normalize Message').item.json.receivedAt }}",
+            "MessageCount": "={{ ($json.records[0].fields.MessageCount || 0) + 1 }}"
+          }
+        }
+      },
+      "id": "update-existing-client",
+      "name": "Update Existing Client",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2,
+      "position": [1120, 420]
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "baseId": "={{ $env.AIRTABLE_BASE_ID }}",
+        "tableId": "={{ $env.AIRTABLE_MESSAGES_TABLE }}",
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Phone": "={{ $('Normalize Message').item.json.from }}",
+            "Message": "={{ $('Normalize Message').item.json.text }}",
+            "Direction": "Inbound",
+            "MessageId": "={{ $('Normalize Message').item.json.messageId }}",
+            "ReceivedAt": "={{ $('Normalize Message').item.json.receivedAt }}"
+          }
+        }
+      },
+      "id": "log-message",
+      "name": "Log Message to CRM",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2,
+      "position": [1340, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.N8N_WEBHOOK_URL }}/webhook/nail-salon-ai-brain",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "phone",
+              "value": "={{ $('Normalize Message').item.json.from }}"
+            },
+            {
+              "name": "message",
+              "value": "={{ $('Normalize Message').item.json.text }}"
+            },
+            {
+              "name": "isNewClient",
+              "value": "={{ $('Client Exists?').item.json.records.length === 0 }}"
+            },
+            {
+              "name": "channel",
+              "value": "={{ $('Normalize Message').item.json.channel }}"
+            }
+          ]
+        }
+      },
+      "id": "route-to-ai-brain",
+      "name": "Route to Bella (AI Brain)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1560, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={ \"status\": \"received\" }"
+      },
+      "id": "respond-ok",
+      "name": "Respond 200 OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1780, 300]
+    }
+  ],
+  "connections": {
+    "Inbound SMS/WhatsApp": {
+      "main": [
+        [{ "node": "Normalize Message", "type": "main", "index": 0 }]
+      ]
+    },
+    "Normalize Message": {
+      "main": [
+        [{ "node": "Check Client in CRM", "type": "main", "index": 0 }]
+      ]
+    },
+    "Check Client in CRM": {
+      "main": [
+        [{ "node": "Client Exists?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Client Exists?": {
+      "main": [
+        [{ "node": "Update Existing Client", "type": "main", "index": 0 }],
+        [{ "node": "Create New Client", "type": "main", "index": 0 }]
+      ]
+    },
+    "Create New Client": {
+      "main": [
+        [{ "node": "Log Message to CRM", "type": "main", "index": 0 }]
+      ]
+    },
+    "Update Existing Client": {
+      "main": [
+        [{ "node": "Log Message to CRM", "type": "main", "index": 0 }]
+      ]
+    },
+    "Log Message to CRM": {
+      "main": [
+        [{ "node": "Route to Bella (AI Brain)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Route to Bella (AI Brain)": {
+      "main": [
+        [{ "node": "Respond 200 OK", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": ["nail-salon", "lead-capture", "smartdesk-ai"]
+}

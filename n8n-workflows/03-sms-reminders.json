@@ -1,0 +1,159 @@
+{
+  "name": "03 - SMS Appointment Reminders",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "cronExpression", "expression": "0 8 * * *" }]
+        }
+      },
+      "id": "daily-trigger",
+      "name": "Daily 8AM Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Calculate target dates\nconst now = new Date();\n\n// Tomorrow (24h reminders)\nconst tomorrow = new Date(now);\ntomorrow.setDate(tomorrow.getDate() + 1);\nconst tomorrowStr = tomorrow.toISOString().split('T')[0];\n\n// Today (2h same-day reminder — sent at 8AM, appointment must be after 10AM)\nconst todayStr = now.toISOString().split('T')[0];\n\nreturn [{ json: { tomorrowStr, todayStr } }];"
+      },
+      "id": "calculate-dates",
+      "name": "Calculate Target Dates",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "operation": "search",
+        "baseId": "={{ $env.AIRTABLE_BASE_ID }}",
+        "tableId": "={{ $env.AIRTABLE_APPOINTMENTS_TABLE }}",
+        "filterByFormula": "=AND({Status}='Confirmed', OR({AppointmentDate}='{{ $json.tomorrowStr }}', {AppointmentDate}='{{ $json.todayStr }}'), {ReminderSent}!=TRUE())",
+        "options": {}
+      },
+      "id": "get-upcoming-appointments",
+      "name": "Get Upcoming Appointments",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "leftValue": "={{ $json.records.length }}",
+              "rightValue": 0,
+              "operator": { "type": "number", "operation": "gt" }
+            }
+          ]
+        }
+      },
+      "id": "has-appointments",
+      "name": "Appointments Found?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "records",
+        "options": {}
+      },
+      "id": "split-appointments",
+      "name": "Split Appointments",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [1120, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "const appt = $input.first().json.fields;\nconst today = new Date().toISOString().split('T')[0];\nconst is24hr = appt.AppointmentDate !== today;\n\nconst clientName = appt.ClientName || 'there';\nconst service = appt.Service || 'your appointment';\nconst time = appt.AppointmentTime || 'your scheduled time';\nconst salonName = process.env.SALON_NAME || 'your salon';\nconst salonPhone = process.env.SALON_PHONE || '';\n\nlet message;\nif (is24hr) {\n  message = `Hi ${clientName}! 💅 Reminder: your ${service} at ${salonName} is TOMORROW at ${time}. Reply Y to confirm or N to cancel. ${salonPhone}`;\n} else {\n  message = `Hi ${clientName}! 💅 See you TODAY at ${time} for your ${service} at ${salonName}! Reply Y to confirm or call ${salonPhone} to reschedule.`;\n}\n\nreturn [{ json: {\n  phone: appt.Phone,\n  message,\n  appointmentId: $input.first().json.id,\n  clientName,\n  reminderType: is24hr ? '24hr' : '2hr'\n}}];"
+      },
+      "id": "build-reminder-message",
+      "name": "Build Reminder Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1340, 200]
+    },
+    {
+      "parameters": {
+        "url": "https://rest.nexmo.com/sms/json",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "api_key", "value": "={{ $env.VONAGE_API_KEY }}" },
+            { "name": "api_secret", "value": "={{ $env.VONAGE_API_SECRET }}" },
+            { "name": "to", "value": "={{ $json.phone }}" },
+            { "name": "from", "value": "={{ $env.VONAGE_FROM_NUMBER }}" },
+            { "name": "text", "value": "={{ $json.message }}" }
+          ]
+        }
+      },
+      "id": "send-reminder-sms",
+      "name": "Send Reminder SMS",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1560, 200]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "baseId": "={{ $env.AIRTABLE_BASE_ID }}",
+        "tableId": "={{ $env.AIRTABLE_APPOINTMENTS_TABLE }}",
+        "id": "={{ $('Build Reminder Message').item.json.appointmentId }}",
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "ReminderSent": true,
+            "ReminderType": "={{ $('Build Reminder Message').item.json.reminderType }}",
+            "ReminderSentAt": "={{ new Date().toISOString() }}"
+          }
+        }
+      },
+      "id": "mark-reminder-sent",
+      "name": "Mark Reminder Sent",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2,
+      "position": [1780, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "// No appointments today — log and exit\nconsole.log('No appointments needing reminders today.');\nreturn [{ json: { status: 'no_appointments', message: 'Nothing to send today' } }];"
+      },
+      "id": "no-appointments",
+      "name": "No Appointments — Skip",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 420]
+    }
+  ],
+  "connections": {
+    "Daily 8AM Trigger": {
+      "main": [[{ "node": "Calculate Target Dates", "type": "main", "index": 0 }]]
+    },
+    "Calculate Target Dates": {
+      "main": [[{ "node": "Get Upcoming Appointments", "type": "main", "index": 0 }]]
+    },
+    "Get Upcoming Appointments": {
+      "main": [[{ "node": "Appointments Found?", "type": "main", "index": 0 }]]
+    },
+    "Appointments Found?": {
+      "main": [
+        [{ "node": "Split Appointments", "type": "main", "index": 0 }],
+        [{ "node": "No Appointments — Skip", "type": "main", "index": 0 }]
+      ]
+    },
+    "Split Appointments": {
+      "main": [[{ "node": "Build Reminder Message", "type": "main", "index": 0 }]]
+    },
+    "Build Reminder Message": {
+      "main": [[{ "node": "Send Reminder SMS", "type": "main", "index": 0 }]]
+    },
+    "Send Reminder SMS": {
+      "main": [[{ "node": "Mark Reminder Sent", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": { "executionOrder": "v1" },
+  "tags": ["nail-salon", "reminders", "sms", "smartdesk-ai"]
+}

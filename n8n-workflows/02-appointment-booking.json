@@ -1,0 +1,298 @@
+{
+  "name": "02 - Bella AI Brain + Appointment Booking",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "nail-salon-ai-brain",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "ai-brain-webhook",
+      "name": "AI Brain Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "operation": "search",
+        "baseId": "={{ $env.AIRTABLE_BASE_ID }}",
+        "tableId": "={{ $env.AIRTABLE_MESSAGES_TABLE }}",
+        "filterByFormula": "=AND({Phone}='{{ $json.phone }}', {Direction}='Inbound')",
+        "options": {
+          "sort": [{ "field": "ReceivedAt", "direction": "desc" }],
+          "maxRecords": 10
+        }
+      },
+      "id": "get-conversation-history",
+      "name": "Get Conversation History",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build conversation history for GPT\nconst messages = $input.first().json.records || [];\nconst history = messages.reverse().map(r => ({\n  role: r.fields.Direction === 'Inbound' ? 'user' : 'assistant',\n  content: r.fields.Message\n}));\n\n// Add current message\nconst currentMsg = $('AI Brain Trigger').first().json.message;\nhistory.push({ role: 'user', content: currentMsg });\n\nreturn [{ json: { history, phone: $('AI Brain Trigger').first().json.phone, isNewClient: $('AI Brain Trigger').first().json.isNewClient } }];"
+      },
+      "id": "build-context",
+      "name": "Build Context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://api.openai.com/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.OPENAI_API_KEY }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "model",
+              "value": "gpt-4o-mini"
+            },
+            {
+              "name": "messages",
+              "value": "=[\n  {\n    \"role\": \"system\",\n    \"content\": \"You are Bella, the friendly AI receptionist for {{ $env.SALON_NAME }}. You help clients book appointments, answer questions about services, and handle cancellations.\\n\\nSALON SERVICES: Manicure ($25), Pedicure ($35), Gel Nails ($45), Acrylic Full Set ($55), Nail Art (+$10-20), Waxing ($15-30).\\n\\nHOURS: Mon-Sat 9AM-7PM, Sun 10AM-5PM.\\n\\nFor booking: collect name, service, preferred date/time. Always confirm before finalizing.\\n\\nRESPOND in JSON format only:\\n{\\n  \\\"intent\\\": \\\"BOOKING|FAQ|CANCEL|RESCHEDULE|REVIEW|ESCALATE|GREETING\\\",\\n  \\\"reply\\\": \\\"your friendly SMS reply here (max 160 chars)\\\",\\n  \\\"extractedData\\\": {\\n    \\\"name\\\": null,\\n    \\\"service\\\": null,\\n    \\\"preferredDate\\\": null,\\n    \\\"preferredTime\\\": null\\n  },\\n  \\\"readyToBook\\\": false\\n}\"\n  }\n].concat({{ JSON.stringify($json.history) }})"
+            },
+            {
+              "name": "max_tokens",
+              "value": 300
+            },
+            {
+              "name": "temperature",
+              "value": 0.3
+            }
+          ]
+        }
+      },
+      "id": "bella-gpt",
+      "name": "Bella (GPT-4o-mini)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json.choices[0].message.content;\nlet parsed;\ntry {\n  parsed = JSON.parse(raw);\n} catch(e) {\n  parsed = {\n    intent: 'ESCALATE',\n    reply: 'Hi! Let me connect you with our team. One moment! 😊',\n    extractedData: {},\n    readyToBook: false\n  };\n}\nreturn [{ json: { ...parsed, phone: $('AI Brain Trigger').first().json.phone } }];"
+      },
+      "id": "parse-bella-response",
+      "name": "Parse Bella Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "leftValue": "={{ $json.intent }}",
+              "rightValue": "BOOKING",
+              "operator": { "type": "string", "operation": "equals" }
+            }
+          ]
+        }
+      },
+      "id": "is-booking",
+      "name": "Is Booking?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1340, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "leftValue": "={{ $json.readyToBook }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "true" }
+            }
+          ]
+        }
+      },
+      "id": "ready-to-book",
+      "name": "Ready to Confirm?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1560, 180]
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "baseId": "={{ $env.AIRTABLE_BASE_ID }}",
+        "tableId": "={{ $env.AIRTABLE_APPOINTMENTS_TABLE }}",
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Phone": "={{ $('Parse Bella Response').item.json.phone }}",
+            "ClientName": "={{ $json.extractedData.name || 'Unknown' }}",
+            "Service": "={{ $json.extractedData.service }}",
+            "PreferredDate": "={{ $json.extractedData.preferredDate }}",
+            "PreferredTime": "={{ $json.extractedData.preferredTime }}",
+            "Status": "Pending Confirmation",
+            "BookedVia": "SMS/AI",
+            "CreatedAt": "={{ new Date().toISOString() }}"
+          }
+        }
+      },
+      "id": "create-appointment",
+      "name": "Create Appointment",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2,
+      "position": [1780, 80]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "leftValue": "={{ $json.intent }}",
+              "rightValue": "ESCALATE",
+              "operator": { "type": "string", "operation": "equals" }
+            }
+          ]
+        }
+      },
+      "id": "needs-escalation",
+      "name": "Needs Escalation?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1340, 480]
+    },
+    {
+      "parameters": {
+        "url": "=https://rest.nexmo.com/sms/json",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "api_key", "value": "={{ $env.VONAGE_API_KEY }}" },
+            { "name": "api_secret", "value": "={{ $env.VONAGE_API_SECRET }}" },
+            { "name": "to", "value": "={{ $('AI Brain Trigger').first().json.phone }}" },
+            { "name": "from", "value": "={{ $env.VONAGE_FROM_NUMBER }}" },
+            { "name": "text", "value": "={{ $('Parse Bella Response').item.json.reply }}" }
+          ]
+        }
+      },
+      "id": "send-reply-sms",
+      "name": "Send Reply SMS (Vonage)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1780, 300]
+    },
+    {
+      "parameters": {
+        "url": "=https://rest.nexmo.com/sms/json",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "api_key", "value": "={{ $env.VONAGE_API_KEY }}" },
+            { "name": "api_secret", "value": "={{ $env.VONAGE_API_SECRET }}" },
+            { "name": "to", "value": "={{ $env.SALON_PHONE }}" },
+            { "name": "from", "value": "={{ $env.VONAGE_FROM_NUMBER }}" },
+            { "name": "text", "value": "=🚨 Staff Alert: Client {{ $('AI Brain Trigger').first().json.phone }} needs assistance. Last message: {{ $('AI Brain Trigger').first().json.message }}" }
+          ]
+        }
+      },
+      "id": "notify-staff",
+      "name": "Notify Staff",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1560, 520]
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "baseId": "={{ $env.AIRTABLE_BASE_ID }}",
+        "tableId": "={{ $env.AIRTABLE_MESSAGES_TABLE }}",
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Phone": "={{ $('AI Brain Trigger').first().json.phone }}",
+            "Message": "={{ $('Parse Bella Response').item.json.reply }}",
+            "Direction": "Outbound",
+            "Intent": "={{ $('Parse Bella Response').item.json.intent }}",
+            "SentAt": "={{ new Date().toISOString() }}"
+          }
+        }
+      },
+      "id": "log-outbound",
+      "name": "Log Outbound Reply",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2,
+      "position": [2000, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={ \"status\": \"processed\" }"
+      },
+      "id": "respond-done",
+      "name": "Done",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [2200, 300]
+    }
+  ],
+  "connections": {
+    "AI Brain Trigger": {
+      "main": [[{ "node": "Get Conversation History", "type": "main", "index": 0 }]]
+    },
+    "Get Conversation History": {
+      "main": [[{ "node": "Build Context", "type": "main", "index": 0 }]]
+    },
+    "Build Context": {
+      "main": [[{ "node": "Bella (GPT-4o-mini)", "type": "main", "index": 0 }]]
+    },
+    "Bella (GPT-4o-mini)": {
+      "main": [[{ "node": "Parse Bella Response", "type": "main", "index": 0 }]]
+    },
+    "Parse Bella Response": {
+      "main": [[{ "node": "Is Booking?", "type": "main", "index": 0 }]]
+    },
+    "Is Booking?": {
+      "main": [
+        [{ "node": "Ready to Confirm?", "type": "main", "index": 0 }],
+        [{ "node": "Needs Escalation?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Ready to Confirm?": {
+      "main": [
+        [{ "node": "Create Appointment", "type": "main", "index": 0 }],
+        [{ "node": "Send Reply SMS (Vonage)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Create Appointment": {
+      "main": [[{ "node": "Send Reply SMS (Vonage)", "type": "main", "index": 0 }]]
+    },
+    "Needs Escalation?": {
+      "main": [
+        [{ "node": "Notify Staff", "type": "main", "index": 0 }],
+        [{ "node": "Send Reply SMS (Vonage)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Notify Staff": {
+      "main": [[{ "node": "Send Reply SMS (Vonage)", "type": "main", "index": 0 }]]
+    },
+    "Send Reply SMS (Vonage)": {
+      "main": [[{ "node": "Log Outbound Reply", "type": "main", "index": 0 }]]
+    },
+    "Log Outbound Reply": {
+      "main": [[{ "node": "Done", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": { "executionOrder": "v1" },
+  "tags": ["nail-salon", "ai-brain", "bella", "booking", "smartdesk-ai"]
+}

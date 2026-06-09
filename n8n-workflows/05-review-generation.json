@@ -1,0 +1,136 @@
+{
+  "name": "05 - Review Generation",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "cronExpression", "expression": "0 */2 * * *" }]
+        }
+      },
+      "id": "every-2hr-trigger",
+      "name": "Every 2 Hours Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "operation": "search",
+        "baseId": "={{ $env.AIRTABLE_BASE_ID }}",
+        "tableId": "={{ $env.AIRTABLE_APPOINTMENTS_TABLE }}",
+        "filterByFormula": "=AND({Status}='Completed', {ReviewRequestSent}!=TRUE(), DATETIME_DIFF(NOW(), {CompletedAt}, 'hours') >= 2, DATETIME_DIFF(NOW(), {CompletedAt}, 'hours') < 24)",
+        "options": {}
+      },
+      "id": "get-completed-appointments",
+      "name": "Get Completed Appointments",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "leftValue": "={{ $json.records.length }}",
+              "rightValue": 0,
+              "operator": { "type": "number", "operation": "gt" }
+            }
+          ]
+        }
+      },
+      "id": "has-completed",
+      "name": "Completed Found?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "records",
+        "options": {}
+      },
+      "id": "split-completed",
+      "name": "Split Completed",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [900, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "const appt = $input.first().json.fields;\nconst clientName = appt.ClientName || 'there';\nconst service = appt.Service || 'your visit';\nconst salonName = process.env.SALON_NAME || 'our salon';\nconst googleUrl = process.env.SALON_GOOGLE_REVIEW_URL || '';\nconst yelpUrl = process.env.SALON_YELP_URL || '';\n\n// Pick one review platform (Google preferred)\nconst reviewUrl = googleUrl || yelpUrl;\nconst platform = googleUrl ? 'Google' : 'Yelp';\n\nconst message = `Hi ${clientName}! 💅 Thanks for visiting ${salonName} today for your ${service}! We hope you loved it! ⭐ Mind leaving us a quick ${platform} review? It helps us a ton:\\n${reviewUrl}\\nThank you! 🙏`;\n\nreturn [{ json: {\n  phone: appt.Phone,\n  message,\n  appointmentId: $input.first().json.id,\n  clientName,\n  reviewUrl,\n  platform\n}}];"
+      },
+      "id": "build-review-message",
+      "name": "Build Review Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 200]
+    },
+    {
+      "parameters": {
+        "url": "https://rest.nexmo.com/sms/json",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "api_key", "value": "={{ $env.VONAGE_API_KEY }}" },
+            { "name": "api_secret", "value": "={{ $env.VONAGE_API_SECRET }}" },
+            { "name": "to", "value": "={{ $json.phone }}" },
+            { "name": "from", "value": "={{ $env.VONAGE_FROM_NUMBER }}" },
+            { "name": "text", "value": "={{ $json.message }}" }
+          ]
+        }
+      },
+      "id": "send-review-sms",
+      "name": "Send Review Request SMS",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1340, 200]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "baseId": "={{ $env.AIRTABLE_BASE_ID }}",
+        "tableId": "={{ $env.AIRTABLE_APPOINTMENTS_TABLE }}",
+        "id": "={{ $('Build Review Request').item.json.appointmentId }}",
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "ReviewRequestSent": true,
+            "ReviewRequestSentAt": "={{ new Date().toISOString() }}",
+            "ReviewPlatform": "={{ $('Build Review Request').item.json.platform }}"
+          }
+        }
+      },
+      "id": "mark-review-sent",
+      "name": "Mark Review Sent",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2,
+      "position": [1560, 200]
+    }
+  ],
+  "connections": {
+    "Every 2 Hours Trigger": {
+      "main": [[{ "node": "Get Completed Appointments", "type": "main", "index": 0 }]]
+    },
+    "Get Completed Appointments": {
+      "main": [[{ "node": "Completed Found?", "type": "main", "index": 0 }]]
+    },
+    "Completed Found?": {
+      "main": [
+        [{ "node": "Split Completed", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "Split Completed": {
+      "main": [[{ "node": "Build Review Request", "type": "main", "index": 0 }]]
+    },
+    "Build Review Request": {
+      "main": [[{ "node": "Send Review Request SMS", "type": "main", "index": 0 }]]
+    },
+    "Send Review Request SMS": {
+      "main": [[{ "node": "Mark Review Sent", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": { "executionOrder": "v1" },
+  "tags": ["nail-salon", "reviews", "google", "smartdesk-ai"]
+}
