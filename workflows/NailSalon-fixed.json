@@ -207,21 +207,22 @@
         "columns": {
           "mappingMode": "defineBelow",
           "value": {
-            "id": "={{ $('Check Client in CRM').item.json.id }}",
+            "Phone": "={{ $('Normalize Message').item.json.from }}",
             "LastMessageAt": "={{ $('Normalize Message').item.json.receivedAt }}"
           },
           "matchingColumns": [
-            "id"
+            "Phone"
           ],
           "schema": [
             {
-              "id": "id",
-              "displayName": "id",
+              "id": "Phone",
+              "displayName": "Phone",
               "required": false,
               "defaultMatch": true,
+              "canBeUsedToMatch": true,
               "display": true,
               "type": "string",
-              "readOnly": true,
+              "readOnly": false,
               "removed": false
             },
             {
