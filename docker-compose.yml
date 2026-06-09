@@ -1,0 +1,31 @@
+version: "3.8"
+
+services:
+  n8n:
+    image: n8nio/n8n:latest
+    ports:
+      - "5678:5678"
+    environment:
+      - N8N_BASIC_AUTH_ACTIVE=false
+      - N8N_ENCRYPTION_KEY=test-encryption-key-32chars-long!
+      - WEBHOOK_URL=http://localhost:5678
+      - N8N_SKIP_WEBHOOK_DEREGISTRATION_SHUTDOWN=true
+      - EXECUTIONS_PROCESS=main
+      - N8N_LOG_LEVEL=info
+      # Workflow variables (mock values for local testing)
+      - AI_AGENT_ACTIVE=true
+      - RETELL_API_KEY=test_retell_key
+      - TWILIO_ACCOUNT_SID=ACtest000000000000000000000000000
+      - TWILIO_AUTH_TOKEN=test_auth_token
+      - TWILIO_FROM_NUMBER=+15315416041
+      - AIRTABLE_BASE_ID=appTestBase123
+      - STYLIST_EMAIL=stylist@nailsalon.com
+      - DEFAULT_STYLIST=Jane Doe
+      - BOOKING_LINK=https://calendly.com/nailsalon/book
+      - GOOGLE_REVIEW_LINK=https://g.page/r/nailsalon/review
+      - LOYALTY_CODE=WELCOME10
+    volumes:
+      - n8n_data:/home/node/.n8n
+
+volumes:
+  n8n_data:
