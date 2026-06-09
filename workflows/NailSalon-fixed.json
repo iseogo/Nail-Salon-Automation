@@ -17,7 +17,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Normalize inbound message from Vonage or Twilio\nconst body = $input.first().json;\n\n// Support both Vonage and Twilio formats\nconst from = body.msisdn || body.From || body.from || '';\nconst text = body.text || body.Body || body.message || '';\nconst messageId = body.messageId || body.MessageSid || Date.now().toString();\nconst channel = body.channel || (body.From ? 'twilio' : 'vonage');\n\nreturn [{\n  json: {\n    from: from.replace(/\\D/g, '').replace(/^1/, ''),  // normalize to 10-digit\n    fromRaw: from,\n    text: text.trim(),\n    messageId,\n    channel,\n    receivedAt: new Date().toISOString()\n  }\n}];"
+        "jsCode": "// Normalize inbound message from SignalWire\nconst body = $input.first().json;\n\n// SignalWire uses Twilio-compatible webhook fields: From, Body, MessageSid\nconst from = body.From || body.from || body.msisdn || '';\nconst text = body.Body || body.body || body.text || body.message || '';\nconst messageId = body.MessageSid || body.messageId || Date.now().toString();\n\n// Detect channel: SignalWire sends AccountSid; fallback to explicit body.channel\nconst channel = body.channel ||\n  (body.AccountSid || body.From ? 'signalwire' : 'unknown');\n\nreturn [{\n  json: {\n    from: from.replace(/\\D/g, '').replace(/^1/, ''),  // normalize to 10-digit\n    fromRaw: from,\n    text: text.trim(),\n    messageId,\n    channel,\n    receivedAt: new Date().toISOString()\n  }\n}];"
       },
       "id": "cf789dc7-be73-41f6-a896-bba6eff2d040",
       "name": "Normalize Message",
