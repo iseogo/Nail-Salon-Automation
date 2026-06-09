@@ -1,0 +1,530 @@
+{
+  "name": "Nail-Salon",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "nail-salon-inbound",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "ebf36bdd-547f-454c-86f5-830a09233795",
+      "name": "Inbound SMS/WhatsApp",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [-544, 416],
+      "webhookId": "cf7abe9f-0b5c-4142-b926-f5a5c36513ee"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Normalize inbound message from Vonage or Twilio\nconst body = $input.first().json;\n\n// Support both Vonage and Twilio formats\nconst from = body.msisdn || body.From || body.from || '';\nconst text = body.text || body.Body || body.message || '';\nconst messageId = body.messageId || body.MessageSid || Date.now().toString();\nconst channel = body.channel || (body.From ? 'twilio' : 'vonage');\n\nreturn [{\n  json: {\n    from: from.replace(/\\D/g, '').replace(/^1/, ''),  // normalize to 10-digit\n    fromRaw: from,\n    text: text.trim(),\n    messageId,\n    channel,\n    receivedAt: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "cf789dc7-be73-41f6-a896-bba6eff2d040",
+      "name": "Normalize Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-320, 416]
+    },
+    {
+      "parameters": {
+        "operation": "search",
+        "base": {
+          "__rl": true,
+          "value": "appfny2KmS3mvwB1d",
+          "mode": "list",
+          "cachedResultName": "Nail Salon",
+          "cachedResultUrl": "https://airtable.com/appfny2KmS3mvwB1d"
+        },
+        "table": {
+          "__rl": true,
+          "value": "tblce4qtIroD8fzq9",
+          "mode": "list",
+          "cachedResultName": "Clients",
+          "cachedResultUrl": "https://airtable.com/appfny2KmS3mvwB1d/tblce4qtIroD8fzq9"
+        },
+        "filterByFormula": "={{ \"={Phone}='\" + $json.from + \"'\" }}",
+        "options": {}
+      },
+      "alwaysOutputData": true,
+      "id": "a182c1ec-c2a2-49ad-9488-8b01a14ff9ae",
+      "name": "Check Client in CRM",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2,
+      "position": [-112, 416],
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "Q1ybIQd7JiDWiCUt",
+          "name": "Airtable Personal Access Token account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.id }}",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "4f8623c1-aef9-48f8-9808-227b5a57f413",
+      "name": "Client Exists?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [128, 416]
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "base": {
+          "__rl": true,
+          "value": "appfny2KmS3mvwB1d",
+          "mode": "list",
+          "cachedResultName": "Nail Salon",
+          "cachedResultUrl": "https://airtable.com/appfny2KmS3mvwB1d"
+        },
+        "table": {
+          "__rl": true,
+          "value": "tblce4qtIroD8fzq9",
+          "mode": "list",
+          "cachedResultName": "Clients",
+          "cachedResultUrl": "https://airtable.com/appfny2KmS3mvwB1d/tblce4qtIroD8fzq9"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Phone": "={{ $('Normalize Message').item.json.from }}",
+            "Status": "New Lead",
+            "Channel": "={{ $('Normalize Message').item.json.channel }}",
+            "FirstContactAt": "={{ $('Normalize Message').item.json.receivedAt }}",
+            "LastMessageAt": "={{ $('Normalize Message').item.json.receivedAt }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Phone",
+              "displayName": "Phone",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Status",
+              "displayName": "Status",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Channel",
+              "displayName": "Channel",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "FirstContactAt",
+              "displayName": "FirstContactAt",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "LastMessageAt",
+              "displayName": "LastMessageAt",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "70925110-f4f1-4bd6-ba00-ecada69e05a7",
+      "name": "Create New Client",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2,
+      "position": [336, 288],
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "Q1ybIQd7JiDWiCUt",
+          "name": "Airtable Personal Access Token account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "base": {
+          "__rl": true,
+          "value": "appfny2KmS3mvwB1d",
+          "mode": "list",
+          "cachedResultName": "Nail Salon",
+          "cachedResultUrl": "https://airtable.com/appfny2KmS3mvwB1d"
+        },
+        "table": {
+          "__rl": true,
+          "value": "tblce4qtIroD8fzq9",
+          "mode": "list",
+          "cachedResultName": "Clients",
+          "cachedResultUrl": "https://airtable.com/appfny2KmS3mvwB1d/tblce4qtIroD8fzq9"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "id": "={{ $('Check Client in CRM').item.json.id }}",
+            "LastMessageAt": "={{ $('Normalize Message').item.json.receivedAt }}",
+            "MessageCount": "={{ ($('Check Client in CRM').item.json.MessageCount || 0) + 1 }}"
+          },
+          "matchingColumns": [
+            "id"
+          ],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": true,
+              "removed": false
+            },
+            {
+              "id": "LastMessageAt",
+              "displayName": "LastMessageAt",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "MessageCount",
+              "displayName": "MessageCount",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "ca63bb47-cd3f-4b4c-aca1-ad9f6757bfb9",
+      "name": "Update Existing Client",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2,
+      "position": [336, 528],
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "Q1ybIQd7JiDWiCUt",
+          "name": "Airtable Personal Access Token account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "duplicateItem": false,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "new-client-flag",
+              "name": "isNewClient",
+              "value": true,
+              "type": "boolean"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "set-new-client-flag",
+      "name": "Set New Client Flag",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3,
+      "position": [560, 288]
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "duplicateItem": false,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "existing-client-flag",
+              "name": "isNewClient",
+              "value": false,
+              "type": "boolean"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "set-existing-client-flag",
+      "name": "Set Existing Client Flag",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3,
+      "position": [560, 528]
+    },
+    {
+      "parameters": {
+        "mode": "append",
+        "options": {}
+      },
+      "id": "merge-paths",
+      "name": "Merge Paths",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 2.1,
+      "position": [784, 416]
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "base": {
+          "__rl": true,
+          "value": "appfny2KmS3mvwB1d",
+          "mode": "list",
+          "cachedResultName": "Nail Salon",
+          "cachedResultUrl": "https://airtable.com/appfny2KmS3mvwB1d"
+        },
+        "table": {
+          "__rl": true,
+          "value": "tblELvjqtmsFWpvMb",
+          "mode": "list",
+          "cachedResultName": "Messages",
+          "cachedResultUrl": "https://airtable.com/appfny2KmS3mvwB1d/tblELvjqtmsFWpvMb"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Phone": "={{ $('Normalize Message').item.json.from }}",
+            "Message": "={{ $('Normalize Message').item.json.text }}",
+            "Direction": "Inbound",
+            "ReceivedAt": "={{ $('Normalize Message').item.json.receivedAt }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Phone",
+              "displayName": "Phone",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Message",
+              "displayName": "Message",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Direction",
+              "displayName": "Direction",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "ReceivedAt",
+              "displayName": "ReceivedAt",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "f13ecc10-0030-4b6d-af02-e1de83b58738",
+      "name": "Log Message to CRM",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2,
+      "position": [1008, 416],
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "Q1ybIQd7JiDWiCUt",
+          "name": "Airtable Personal Access Token account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.N8N_WEBHOOK_URL }}/webhook/nail-salon-ai-brain",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "phone",
+              "value": "={{ $('Normalize Message').item.json.from }}"
+            },
+            {
+              "name": "message",
+              "value": "={{ $('Normalize Message').item.json.text }}"
+            },
+            {
+              "name": "isNewClient",
+              "value": "={{ $('Merge Paths').item.json.isNewClient }}"
+            },
+            {
+              "name": "channel",
+              "value": "={{ $('Normalize Message').item.json.channel }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "2854c043-1a78-4c8a-9e51-fff1fef85b28",
+      "name": "Route to Bella (AI Brain)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1232, 416]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{ \"status\": \"received\" }",
+        "options": {}
+      },
+      "id": "f6a44ad4-5a26-4d17-88cf-cbcc584c1ce9",
+      "name": "Respond 200 OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1456, 416]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Inbound SMS/WhatsApp": {
+      "main": [
+        [{ "node": "Normalize Message", "type": "main", "index": 0 }]
+      ]
+    },
+    "Normalize Message": {
+      "main": [
+        [{ "node": "Check Client in CRM", "type": "main", "index": 0 }]
+      ]
+    },
+    "Check Client in CRM": {
+      "main": [
+        [{ "node": "Client Exists?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Client Exists?": {
+      "main": [
+        [{ "node": "Update Existing Client", "type": "main", "index": 0 }],
+        [{ "node": "Create New Client", "type": "main", "index": 0 }]
+      ]
+    },
+    "Update Existing Client": {
+      "main": [
+        [{ "node": "Set Existing Client Flag", "type": "main", "index": 0 }]
+      ]
+    },
+    "Create New Client": {
+      "main": [
+        [{ "node": "Set New Client Flag", "type": "main", "index": 0 }]
+      ]
+    },
+    "Set New Client Flag": {
+      "main": [
+        [{ "node": "Merge Paths", "type": "main", "index": 0 }]
+      ]
+    },
+    "Set Existing Client Flag": {
+      "main": [
+        [{ "node": "Merge Paths", "type": "main", "index": 1 }]
+      ]
+    },
+    "Merge Paths": {
+      "main": [
+        [{ "node": "Log Message to CRM", "type": "main", "index": 0 }]
+      ]
+    },
+    "Log Message to CRM": {
+      "main": [
+        [{ "node": "Route to Bella (AI Brain)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Route to Bella (AI Brain)": {
+      "main": [
+        [{ "node": "Respond 200 OK", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "7b579224-91dd-4971-a42b-d917d6f45b46",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "b2bdc955a1ecabf3d65a5bbc2329c71ab02610d843ad59a29b66e1e7e4e62ed5"
+  },
+  "id": "SYxGdK1CmbAVjgN5",
+  "tags": []
+}
